@@ -30,6 +30,21 @@ class App extends Component {
   }
 
   componentDidMount = async () => {
+    await this.initWeb3();
+    //await this.pollData();
+    setInterval(this.pollData, 1000);
+    
+  };
+
+  pollData = async () => {
+    await this.getPot();
+    await this.getBetEvents();
+    await this.getWinEvents();
+    await this.getFailEvents();
+    await this.makeFinalRecords();
+  }
+
+  initWeb3 = async () => {
     try {
       const web3 = await getWeb3();
       const accounts = await web3.eth.getAccounts();
@@ -45,24 +60,93 @@ class App extends Component {
       console.error(error);
     }
     this.account = this.state.accounts[0]
-    /*let pot = await this.state.contract.methods.getPot().call()
-    console.log(pot)
-    let owner = await this.state.contract.methods.owner().call()
-    console.log(owner)*/
-    //await this.bet();
-    await this.getBetEvents();
-    
-  };
+  }
+
+  getPot = async () => {
+    let pot = await this.state.contract.methods.getPot().call()
+    pot = this.state.web3.utils.fromWei(pot.toString(), 'ether')
+    this.setState({pot: pot})
+  } 
+
+  makeFinalRecords = () => {
+    let f=0, w=0;
+    const records = [...this.state.betRecord]
+    for(let i=0;i<records.length; i++){
+      if(this.state.winRecord.length > 0 && this.state.betRecord[i].index === this.state.winRecord[w].index){
+        records[i].win = 'WIN'
+        records[i].answer = records[i].challenges;
+        console.log('adfasdf')
+        records[i].pot = this.state.web3.utils.fromWei(this.state.winRecord[w].amount, 'ether');
+        if(this.state.winRecord.length - 1 > w) w++;
+        
+      }else if(this.state.failRecord.length > 0 && this.state.betRecord[i].index === this.state.failRecord[f].index){
+        records[i].win = 'FAIL'
+        records[i].answer = this.state.failRecord[f].answer;
+        records[i].pot = 0;
+        if(this.state.failRecord.length - 1> f) f++;
+        
+      }else {
+        records[i].answer = 'Not Revealed';
+      }
+    }
+    console.log(records)
+    this.setState({finalRecord: records})
+  }
+
   getBetEvents = async () => {
     const records = [];
     let events = await this.state.contract.getPastEvents('BET', {fromBlock: 0, toBlock: 'latest'})
-    console.log(events)
+
+    for(let i=0;i<events.length;i++){
+      const record = {}
+      record.index = parseInt(events[i].returnValues.index, 10).toString();
+      record.bettor = events[i].returnValues.bettor.slice(0,4) + '...' +events[i].returnValues.bettor.slice(40,42);
+      record.betBlockNumber = events[i].betBlockNumber;
+      record.targetBlockNumber = events[i].returnValues.answerBlockNumber.toString();
+      record.challenges = events[i].returnValues.challenges;
+      record.win = 'Not Revealed';
+      record.answer = '0x00';
+      records.unshift(record);
+    }
+    this.setState({betRecord: records})
+  }
+
+  getWinEvents = async () => {
+    const records = [];
+    let events = await this.state.contract.getPastEvents('WIN', {fromBlock: 0, toBlock: 'latest'})
+    for(let i=0;i<events.length;i++){
+      const record = {}
+      record.index = parseInt(events[i].returnValues.index, 10).toString();
+      record.amount = parseInt(events[i].returnValues.amount, 10).toString();
+      records.unshift(record);
+    }
+    
+    this.setState({winRecord: records})
+  }
+
+  getFailEvents = async () => {
+    const records = [];
+    let events = await this.state.contract.getPastEvents('FAIL', {fromBlock: 0, toBlock: 'latest'})
+    
+    for(let i=0;i<events.length;i++){
+      const record = {}
+      record.index = parseInt(events[i].returnValues.index, 10).toString();
+      record.answer = events[i].returnValues.answer;
+      records.unshift(record);
+    }
+    console.log(records)
+    this.setState({failRecord: records})
   }
 
   bet = async () => {
+    //nonce
+
+    let challenges = '0x' + this.state.challenges[0].toLowerCase() + this.state.challenges[1].toLowerCase();
     let nonce = await this.state.web3.eth.getTransactionCount(this.state.accounts[0]);
-    this.state.contract.methods.betAndDistribute('0xcd').send({from: this.state.accounts[0], value: 5000000000000000, gas: 300000})
-    console.log(await this.state.contract.methods.getPot().call())
+    this.state.contract.methods.betAndDistribute(challenges).send({from: this.state.accounts[0], value: 5000000000000000, gas: 300000, nonce: nonce})
+    .on('transactionHash', (hash) => {
+      console.log(hash);
+    })
   }
   
   
@@ -73,6 +157,12 @@ class App extends Component {
 
   //History table
   //index address challenge answer pot status answerBlockNumber
+
+  onClickCard = (_Character) => {
+    this.setState({
+      challenges: [this.state.challenges[1], _Character]
+    })
+  }
   getCard = (_Character, _cardStyle) => {
     let _card = '';
     if(_Character ==='A'){
@@ -89,7 +179,9 @@ class App extends Component {
     }
 
     return(
-      <button className={_cardStyle}>
+      <button className={_cardStyle} onClick={() => {
+        this.onClickCard(_Character)
+      }}>
         <div className="card-body text-center">
           <p className="card-text"></p>
           <p className="card-text test-center" style={{fontSize:300}}>{_card}</p>
@@ -112,7 +204,7 @@ class App extends Component {
             <h1>Current Pot:{this.state.pot}</h1>
             <h1>Lottery</h1>
             <p>Your Bet</p>
-            <p>{this.state.challenges[0]}{this.state.challenges[1]}</p>
+            <p>{this.state.challenges[0]} {this.state.challenges[1]}</p>
           </div>
         </div>
 
@@ -128,7 +220,7 @@ class App extends Component {
 
         <br></br>
         <div className="container">
-          <button className="btn btn-danger btn-lg">BET!</button>
+          <button className="btn btn-danger btn-lg" onClick={this.bet}>BET!</button>
         </div>
         <br></br>
 
@@ -150,13 +242,13 @@ class App extends Component {
                 this.state.finalRecord.map((record, index) => {
                   return (
                     <tr key={index}>
-                      <td>0</td>
-                      <td>0</td>
-                      <td>0</td>
-                      <td>0</td>
-                      <td>0</td>
-                      <td>0</td>
-                      <td>0</td>
+                      <td>{record.index}</td>
+                      <td>{record.bettor}</td>
+                      <td>{record.challenges}</td>
+                      <td>{record.answer}</td>
+                      <td>{record.pot}</td>
+                      <td>{record.win}</td>
+                      <td>{record.targetBlockNumber}</td>
                     </tr>
 
                   );
